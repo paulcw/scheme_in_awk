@@ -14,9 +14,21 @@ It's a Scheme interpreter, written in Awk.
 ## Why is it?
 
 - It seemed like an interesting, ridiculous exercise.
-- It's been a while since college, so thought it would be interesting to get back in the headspace of language design and such.
+- It's been a while since college, so thought it would be interesting
+	to get back in the headspace of language design and such.
+	Mostly I've worked backend application-level web development
+	over the years, wanted to play with some other stuff.
 - More fun time with LISP-family languages.
 - It seems interesting to see what you can do to get around the limitations of awk.
+- I was reading about LISP Machines -- something that I completely missed -- and some implementation details, to the extent that I understood them, seemed interesting.  Wondered if a silly implemenation would hit similar issues.  It would be nice if I could learn enough about Scheme implementation to -- say -- be able to implement an interpreter in Z80 assembly or something, later, for the next set of laughs.
+
+## How to use it
+
+	$ ./scheme.awk < schemeprogram.scm
+or
+	$ ./scheme.awk
+to use it interactively.  Remember to set it executable, otherwise
+you can do `awk -f scheme.awk` instead.
 
 ## Approach
 
@@ -71,12 +83,12 @@ this is done.
 So this is fun!  The Awk I'm using (mawk that came with Ubuntu Linux)
 has a flag compiled that limits the stack to 1024 frames!
 For debugging purposes, apparently.
-I discovered this via a (presumably broken) recursive function, but
+I discovered this via a (presumably) broken recursive function, but
 any working non-trivial program will probably hit that limit pretty quick,
 assuming I delegate the Scheme stack to the Awk stack.
 So recursion basically won't work once I get to nontrivial program sizes!
 
-Now, I /could/, and in any practical project /would/, just use a better
+Now, I *could*, and in any practical project *would*, just use a better
 Awk.  There are other awks available for Linux, and I could get a newer
 compilation of mawk (or just compile my own) to get past that limitation.
 
