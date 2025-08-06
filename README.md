@@ -25,8 +25,11 @@ It's a Scheme interpreter, written in Awk.
 ## How to use it
 
 	$ ./scheme.awk < schemeprogram.scm
+
 or
+
 	$ ./scheme.awk
+
 to use it interactively.  Remember to set it executable, otherwise
 you can do `awk -f scheme.awk` instead.
 
