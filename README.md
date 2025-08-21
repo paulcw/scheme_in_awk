@@ -31,6 +31,8 @@ It's a Scheme interpreter, written in Awk.
 	similar issues.  It would be nice if I could learn enough about Scheme
 	implementation to -- say -- be able to implement an interpreter in Z80
 	assembly or something, later, for the next set of laughs.
+	- Ha!  Turns out TinyScheme written in C already compiles and runs
+		fine on a Z80, I'm told.
 
 ## How to use it
 
