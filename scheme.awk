@@ -75,7 +75,7 @@ function tokenize_around_special_chars(line,	metachar, metachar_pos) {
 	# the regexp is of course hard to read, it looks for ( ) ' " ; |
 	# not using split() because there's apparently no way to capture the matches
 	while (match(line, /([\(\)\'\"\;\|])/)) {
-		metachar_pos = RSTART
+		metachar_pos = RSTART # TODO why didn't i want to use index() here?
 		metachar = substr(line, metachar_pos, 1)
 
 		# deal with whatever's before the metachar
@@ -94,7 +94,7 @@ function tokenize_around_special_chars(line,	metachar, metachar_pos) {
 		} else if (metachar == "\"") {
 			# look for closing quote
 			if (match(substr(line, metachar_pos + 1), /\"/)) {
-			tokens[tokens_idx, "lineno"] = NR
+				tokens[tokens_idx, "lineno"] = NR
 				tokens[tokens_idx++] = substr(line, metachar_pos, RSTART + 1)
 				line = substr(line, metachar_pos + RSTART + 1)
 			} else {
@@ -164,6 +164,16 @@ function init_memory() {
 	# of habit really. TODO maybe change the value for clarity?
 
 	HEAP_IDX = 1 # first available memory location.
+	# the heap itself is just "HEAP", nothing to initialize
+
+	# not sure about this, but here's the first pass
+	# global vars will go into a list called GLOBALS.
+	# this will be directly modified when things are added to it.
+	# i may have to change this later, it feels like a horrible hack.
+	# I expect that local environments will point to it to continue
+	# their own lists.
+	# Eventually, builtins etc will probably go into this list.
+	GLOBALS = NULL
 }
 
 function get_memory_cell() {
@@ -219,6 +229,16 @@ function dump_heap(		loc) {
 	for (i = 1; i < HEAP_IDX ; i++) {
 	  	loc = sprintf("|%d", i)
 	  	printf("%d\t:\t%s\t:\t%s\n", i, HEAP[loc, "car"], HEAP[loc, "cdr"])
+	}
+}
+
+function dump_globals(		ptr, kv) {
+	ptr = GLOBALS
+	print("GLOBALS:")
+	while(ptr != NULL) {
+		kv = car(ptr)
+		printf("name: %s : value: %s\n", car(kv), car(cdr(kv)))
+		ptr = cdr(ptr)
 	}
 }
 
@@ -357,7 +377,7 @@ function eat_list_expression(	val, cdrval, lineno) {
 # eval will almost certainly need to do the same no-recursion thing
 # that display() does.  Parsing too probably.
 
-function eval(thing,	op, args) {
+function eval(thing,	op, args, ref) {
 
 	# My sample repl will do this when trying to eval an empty list
 	# TODO confirm that this is correct behavior.
@@ -367,15 +387,19 @@ function eval(thing,	op, args) {
 		exit(1)
 	}
 
-	if (!is_pair(thing)) {
-		# for now, anything that's not a string, evaluates to itself
+	# booleans and numbers and strings evaluate to themselves
+	if (is_boolean(thing) || is_number(thing) || is_string(thing)) {
 		return thing
-		# TODO later, I'll have to determine the type, and if it's a
-		# primitive (like a number or boolean) (and I don't know if "primitive"
-		# is even Scheme terminology) it can evaluate as that type, otherwise
-		# we'll have to do a symbol lookup, to see if it's bound to anything
-		# (and it's an error if it isn't).
-		# but today is not that day
+	}
+
+	if (!is_pair(thing)) {
+		# must be a variable, look it up to see if it's bound
+		ref = find_in_binding_list(thing, GLOBALS)
+		if (ref == NULL) {
+			print("Unbound variable:", thing)
+			exit(1) # TODO I'm pretty sure all these calls to exit are wrong...
+		}
+		return car(cdr(ref))
 	}
 
 	# if it's a non-empty list, get the first element as an operator
@@ -384,8 +408,24 @@ function eval(thing,	op, args) {
 	#	- the value must be an atom
 	#	- look up the atom as a symbol, see if a func is bound to it
 	# but it's all hardcoded for now
+	# also -- it's not necessarily an operator, it could be syntax, etc.
+	# TODO think of a more generic name
 
 	args = cdr(thing)
+
+	# handling syntax, this is such a hack.
+	# TODO please, no more lists of keywords
+	if (op == "define" || op == "set!") { # or "let" soon enough, I hope
+		return syntax(op, args)
+		# TODO I notice that the repl I'm using as a comparison,
+		# calls some of this stuff "macro".  this suggests a better
+		# approach could be to transform the expression prior to
+		# evaluation, rather than handling this whole thing separately.
+	}
+
+	# assuming whatever else is a normal procedure application,
+	# so we evaluate all the args then apply the operator
+
 	# next, if not a quote we DESTRUCTIVELY go through the list of args,
 	# evaluating them (replacing expressions with their values). TODO
 	# in the future, I expect to find that this won't work and we'll
@@ -400,6 +440,70 @@ function eval(thing,	op, args) {
 	# next line will only be a fallback.
 	return builtins(op, args)
 }
+
+
+# i call this "syntax" because I expect it will be used
+# to handle syntactical things, but so far it only handles define and set!
+# one intersting thing is that i think "let" returns values, it's like
+# an expression, but "define" and "set!" I think don't.  maybe these
+# should be handled by different funcs? TODO
+function syntax(op, args,		id, expr, ref, val) {
+	# TODO there are limits to where 'define' even makes sense, and i'm
+	# currently ignoring all of that
+	# -- well, basically, if you're in an environemnt, it defines in there.
+	# so basically i need to differentiate between those when i call define. TODO
+	# hopefully, adding (let) will make this clearer.
+	if (!two_elt_list(args)) {
+		print("wrong number of arguments line", DEBUG[args])
+		# I don't think exit does what I expect it to, but I keep calling it TODO fix
+		exit(1)
+	}
+	id = car(args)
+	expr = car(cdr(args))
+	ref = find_in_binding_list(id, GLOBALS)
+	if (ref == NULL) {
+		if (op == "set!") {
+			print(id, "not bound for set!")
+			exit(1)
+		} else if (op == "define") {
+			val = eval(expr)
+			GLOBALS = cons(cons(id, cons(val, NULL)), GLOBALS)
+		} else {
+			print("unknown syntax:", op)
+			exit(1)
+		}
+	} else {
+		val = eval(expr)
+		store_car(cdr(ref), val)
+	}
+	# NOTE that all the code here is for define and set!
+}
+
+
+# OK, deciding that the global environment is a list of lists
+# the interior list is the name/value pair
+# TODO move this comment somewhere useful
+
+
+function find_in_binding_list(id, list,		item) {
+	while(list != NULL) {
+		item = car(list)
+		if (item == NULL) {
+			print("There shouldn't be a null item here, but there is:", list)
+		}
+		if (car(item) == id) {
+			return item
+		}
+		list = cdr(list)
+	}
+	return NULL
+}
+
+
+# TODO it occurs to me that I'm implementing a lot of scheme-like
+# behavior, in awk, and to an extent that's inevitable, but I wonder if
+# I could end up moving some of this directly into scheme code that's
+# invoked by the interpreter.
 
 
 # this evaluates the individual arguments, before passing what
@@ -499,12 +603,42 @@ function builtins(op, list) {
 			exit(1)
 		}
 		# I defined this like a builtin but just because it appeared
-		# in "The Little Schemer", not sure if it's actually a standard func.
-		# TODO I should compare to the language spec.
+		# in "The Little Schemer", but it's not actually a standard func.
+		# TODO remove probably
 		if (is_pair(car(list))) {
 			return "#f"
 		}
 		return "#t"
+
+	} else if (op == "boolean?") {
+		if (!one_elt_list(list)) {
+			print("wrong number of arguments line", DEBUG[list])
+			exit(1)
+		}
+		if (is_boolean(car(list))) {
+			return "#t"
+		}
+		return "#f"
+
+	} else if (op == "number?") {
+		if (!one_elt_list(list)) {
+			print("wrong number of arguments line", DEBUG[list])
+			exit(1)
+		}
+		if (is_number(car(list))) {
+			return "#t"
+		}
+		return "#f"
+
+	} else if (op == "string?") {
+		if (!one_elt_list(list)) {
+			print("wrong number of arguments line", DEBUG[list])
+			exit(1)
+		}
+		if (is_string(car(list))) {
+			return "#t"
+		}
+		return "#f"
 
 	} else if (op == "eq?") {
 		if (!two_elt_list(list)) {
@@ -515,6 +649,9 @@ function builtins(op, list) {
 			return "#t"
 		}
 		return "#f"
+
+	} else if (op == "dump_globals") {
+		dump_globals()
 
 	} else {
 		print("unknown op:", op)
@@ -532,6 +669,43 @@ function two_elt_list(list) {
 	return list != NULL && cdr(list) != NULL && cdr(cdr(list)) == NULL
 }
 
+
+# here are predicates the spec gives
+#boolean?
+#char?
+#null?
+#pair?
+#procedure?
+#symbol?
+#bytevector?
+#eof-object?
+#number?
+#port?
+#string?
+#vector?
+# the spec says, no object satisfies more than one of those
+
+# Re: numbers, the spec defines:
+# number?  complex?  real?  rational?  integer?
+# but doesn't require that all be implemented.
+# The spec also has a whole section on exactness, which
+# i'm calling out of bounds for this project.
+
+function is_boolean(v) {
+	return v == "#f" || v == "#t" || v == "#true" || v == "#false"
+}
+
+function is_number(v) {
+	# gnu awk has a "typeof" func, but mawk does not
+	# i could possibly just use the "if (x + 0) == x" trick
+	# but hell let's try regexps
+	return v ~ /^[+-]?[0-9]+(\.[0-9]+)?(e[+-]?[0-9]+)?$/
+}
+
+# note that I'm not handling embedded quoted chars...TODO
+function is_string(v) {
+	return v ~ /^".*"$/
+}
 
 
 # For display, I originally wrote a sane set of mutually recursive functions 
