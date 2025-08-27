@@ -30,12 +30,13 @@ END {
 	print("start:", commands)
 
 	# note that we're being destructive with "commands" here...
+	# TODO why the f did i call it "commands".  they're expressions
 	while(commands != NULL) {
 		command = car(commands)
 		print("COMMAND:")
 		display(command)
 		print("RESULT IS:")
-		display(eval(command))
+		display(eval(GLOBALS, command))
 		print("\n----")
 		commands = cdr(commands)
 	}
@@ -374,10 +375,11 @@ function eat_list_expression(	val, cdrval, lineno) {
 ##############
 
 
-# eval will almost certainly need to do the same no-recursion thing
+# TODO eval will almost certainly need to do the same no-recursion thing
 # that display() does.  Parsing too probably.
+# TODO "thing"?  probably should call it something like "expr"
 
-function eval(thing,	op, args, ref) {
+function eval(env, thing,		op, args, ref) {
 
 	# My sample repl will do this when trying to eval an empty list
 	# TODO confirm that this is correct behavior.
@@ -394,7 +396,7 @@ function eval(thing,	op, args, ref) {
 
 	if (!is_pair(thing)) {
 		# must be a variable, look it up to see if it's bound
-		ref = find_in_binding_list(thing, GLOBALS)
+		ref = find_in_binding_list(thing, env)
 		if (ref == NULL) {
 			print("Unbound variable:", thing)
 			exit(1) # TODO I'm pretty sure all these calls to exit are wrong...
@@ -415,12 +417,11 @@ function eval(thing,	op, args, ref) {
 
 	# handling syntax, this is such a hack.
 	# TODO please, no more lists of keywords
-	if (op == "define" || op == "set!") { # or "let" soon enough, I hope
-		return syntax(op, args)
+	if (op == "define" || op == "set!" || op == "let") {
+		return syntax(op, args, env)
 		# TODO I notice that the repl I'm using as a comparison,
-		# calls some of this stuff "macro".  this suggests a better
-		# approach could be to transform the expression prior to
-		# evaluation, rather than handling this whole thing separately.
+		# calls some of this stuff "macro".  are they actually using
+		# macros?  am i thinking about this wrong?
 	}
 
 	# assuming whatever else is a normal procedure application,
@@ -433,7 +434,7 @@ function eval(thing,	op, args, ref) {
 	if (op != "quote") {
 		# we don't recursively evaluate the args inside a quoted thing.
 		# that misses the point of quoting
-		eval_args(args)
+		eval_args(env, args)
 	}
 
 	# for now, we only execute builtins.  in the future i expect the
@@ -447,11 +448,12 @@ function eval(thing,	op, args, ref) {
 # one intersting thing is that i think "let" returns values, it's like
 # an expression, but "define" and "set!" I think don't.  maybe these
 # should be handled by different funcs? TODO
-function syntax(op, args,		id, expr, ref, val) {
+function syntax(op, args, env,		id, expr, ref, val) {
 	# TODO there are limits to where 'define' even makes sense, and i'm
 	# currently ignoring all of that
 	# -- well, basically, if you're in an environemnt, it defines in there.
 	# so basically i need to differentiate between those when i call define. TODO
+
 	# hopefully, adding (let) will make this clearer.
 	if (!two_elt_list(args)) {
 		print("wrong number of arguments line", DEBUG[args])
@@ -460,20 +462,26 @@ function syntax(op, args,		id, expr, ref, val) {
 	}
 	id = car(args)
 	expr = car(cdr(args))
-	ref = find_in_binding_list(id, GLOBALS)
+	ref = find_in_binding_list(id, env)
 	if (ref == NULL) {
 		if (op == "set!") {
 			print(id, "not bound for set!")
 			exit(1)
 		} else if (op == "define") {
-			val = eval(expr)
-			GLOBALS = cons(cons(id, cons(val, NULL)), GLOBALS)
+			if (env == GLOBALS) {
+				val = eval(env, expr)
+				GLOBALS = cons(cons(id, cons(val, NULL)), env)
+				env = GLOBALS
+			} else {
+				print("Can only use define on top level!")
+				exit(0)
+			}
 		} else {
 			print("unknown syntax:", op)
 			exit(1)
 		}
 	} else {
-		val = eval(expr)
+		val = eval(env, expr)
 		store_car(cdr(ref), val)
 	}
 	# NOTE that all the code here is for define and set!
@@ -510,10 +518,10 @@ function find_in_binding_list(id, list,		item) {
 # will hopefully be a list of primitives to the operator above.
 # It's destructive, destroying the list!  It will probably eventually
 # need to be a copy.
-function eval_args(list) {
+function eval_args(env, list) {
 	if (list != NULL) {
-		store_car(list, eval(car(list)))
-		eval_args(cdr(list))
+		store_car(list, eval(env, car(list)))
+		eval_args(env, cdr(list))
 	}
 }
 
@@ -573,7 +581,7 @@ function builtins(op, list) {
 			print("wrong number of /bad arguments line", DEBUG[list])
 			exit(1)
 		}
-		return eval(car(list))
+		return eval(env, car(list))
 
 	} else if (op == "null?") {
 		if (!one_elt_list(list)) {
