@@ -40,6 +40,10 @@ END {
 		print("\n----")
 		commands = cdr(commands)
 	}
+	# TODO: replace with eval_list, maybe, if it still exists later.
+	# decided to keep it separate here so i can wrap that debugging
+	# output around it.  later, may do that by wrapping with lambda statements,
+	# or more enhanced tracing if such exists.
 }
 
 
@@ -417,7 +421,7 @@ function eval(env, thing,		op, args, ref) {
 
 	# handling syntax, this is such a hack.
 	# TODO please, no more lists of keywords
-	if (op == "define" || op == "set!" || op == "let") {
+	if (op == "define" || op == "set!" || op == "let" || op == "let*") {
 		return syntax(op, args, env)
 		# TODO I notice that the repl I'm using as a comparison,
 		# calls some of this stuff "macro".  are they actually using
@@ -443,49 +447,123 @@ function eval(env, thing,		op, args, ref) {
 }
 
 
+function eval_list(env, list,		expr) {
+	while(list != NULL) {
+		expr = car(list)
+		eval(env, expr)
+		list = cdr(list)
+	}
+}
+
+
+
+
 # i call this "syntax" because I expect it will be used
 # to handle syntactical things, but so far it only handles define and set!
 # one intersting thing is that i think "let" returns values, it's like
 # an expression, but "define" and "set!" I think don't.  maybe these
 # should be handled by different funcs? TODO
-function syntax(op, args, env,		id, expr, ref, val) {
-	# TODO there are limits to where 'define' even makes sense, and i'm
-	# currently ignoring all of that
-	# -- well, basically, if you're in an environemnt, it defines in there.
-	# so basically i need to differentiate between those when i call define. TODO
+function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings) {
+	# only allowing define on the top level
+	# for future versions, defines at the start of a block could maybe
+	# be turned into an implicit LET* TODO later maybe (i think it will be
+	# fine to just skip that, actually, basically it's just syntactic sugar)
 
-	# hopefully, adding (let) will make this clearer.
-	if (!two_elt_list(args)) {
-		print("wrong number of arguments line", DEBUG[args])
-		# I don't think exit does what I expect it to, but I keep calling it TODO fix
-		exit(1)
-	}
-	id = car(args)
-	expr = car(cdr(args))
-	ref = find_in_binding_list(id, env)
-	if (ref == NULL) {
-		if (op == "set!") {
-			print(id, "not bound for set!")
+	if (op == "define" || op == "set!") {
+		if (!two_elt_list(args)) {
+			print("wrong number of arguments line", DEBUG[args])
+			# I don't think exit does what I expect it to, but I keep calling it TODO fix
 			exit(1)
-		} else if (op == "define") {
-			if (env == GLOBALS) {
+		}
+		if (op == "define" && env != GLOBALS) {
+			print("Can only use define on top level")
+			exit(1)
+		}
+		id = car(args)
+		expr = car(cdr(args))
+		ref = find_in_binding_list(id, env)
+		if (ref == NULL) {
+			if (op == "set!") {
+				print(id, "not bound for set!")
+				exit(1)
+			} else if (op == "define") {
 				val = eval(env, expr)
 				GLOBALS = cons(cons(id, cons(val, NULL)), env)
 				env = GLOBALS
-			} else {
-				print("Can only use define on top level!")
-				exit(0)
 			}
 		} else {
-			print("unknown syntax:", op)
+			val = eval(env, expr)
+			store_car(cdr(ref), val)
+		}
+
+	# r7rs: "In a let expression, the initial values are computed
+	# before any of the variables become bound; in a let* expression,
+	# the bindings and evaluations are performed sequentially;
+	# while in letrec and letrec* expressions, all the bindings are
+	# in effect while their initial values are being computed,
+	# thus allowing mutually recursive definitions."
+	# so for following, the thing that changes is really just the manner
+	# of figuring the bindings.  which come to think of it, isn't really
+	# all that helpful, because everything else is almost nothing.
+	} else if (op == "let") {
+		if (args == NULL || one_elt_list(args)) {
+			print("error: let but no bindings and/or no body")
 			exit(1)
 		}
+		bindingdefs = car(args)
+		newbindings = env
+		while (bindingdefs != NULL) {
+			b = car(bindingdefs)
+			if (!two_elt_list(b)) {
+				print("error: bindings need 2 elts")
+				exit(1)
+			}
+			# create a new binding, which is a list, and add it to the
+			# front of new list of bindings (which ends by connecting to
+			# existing env), but don't execute any of the evaluations
+			# in the binding list, using the new binding list
+			newbindings = cons(cons(car(b), cons(eval(env, car(cdr(b))), NULL)), newbindings)
+			bindingdefs = cdr(bindingdefs)
+		}
+		eval_list(newbindings, cdr(args))
+	} else if (op == "let*") {
+		if (args == NULL || one_elt_list(args)) {
+			print("error: let but no bindings and/or no body")
+			exit(1)
+		}
+		bindingdefs = car(args)
+		newbindings = env
+		while (bindingdefs != NULL) {
+			b = car(bindingdefs)
+			if (!two_elt_list(b)) {
+				print("error: bindings need 2 elts")
+				exit(1)
+			}
+			# create a new binding, which is a list, and add it to the
+			# front of new list of bindings (which ends by connecting to
+			# existing env), and use the new binding list in subsequent
+			# binding evals
+			newbindings = cons(cons(car(b), cons(eval(newbindings, car(cdr(b))), NULL)), newbindings)
+			bindingdefs = cdr(bindingdefs)
+		}
+		eval_list(newbindings, cdr(args))
+
 	} else {
-		val = eval(env, expr)
-		store_car(cdr(ref), val)
+		print("somehow you called this with an unsupported syntax:", op)
 	}
-	# NOTE that all the code here is for define and set!
 }
+
+# TODO i could probably find an is_empty and/or not_empty useful...
+# for all those loops through lists...although all it's doing now
+# is comparing to NULL, it won't be that big an improvement, just a little
+# more self-documenting...
+
+
+# It occurs to me that in a way all of these ^^ are modifications
+# of the environment, and then a succession of statements being performed.
+# which I guess isn't exactly a revelation, but may be useful if I need
+# to squash awk call trees later...
+
 
 
 # OK, deciding that the global environment is a list of lists
