@@ -21,24 +21,21 @@ END {
 	#dump_tokens()
 
 	init_memory()
-	commands = parse()
-	# TODO "commands" is a terrible name; they're not commands at all
-
+	expressions = parse()
 
 	print("heap:")
 	dump_heap()
-	print("start:", commands)
+	print("start:", expressions)
 
-	# note that we're being destructive with "commands" here...
-	# TODO why the f did i call it "commands".  they're expressions
-	while(commands != NULL) {
-		command = car(commands)
-		print("COMMAND:")
-		display(command)
+	# note that we're being destructive with "expressions" here...
+	while(expressions != NULL) {
+		expr = car(expressions)
+		print("EXPRESSION:")
+		display(expr)
 		print("RESULT IS:")
-		display(eval(GLOBALS, command))
+		display(eval(GLOBALS, expr))
 		print("\n----")
-		commands = cdr(commands)
+		expressions = cdr(expressions)
 	}
 	# TODO: replace with eval_list, maybe, if it still exists later.
 	# decided to keep it separate here so i can wrap that debugging
@@ -204,6 +201,13 @@ function cdr(loc) {
 	return HEAP[loc, "cdr"]
 }
 
+# TODO I added support for line numbers in input, but I'm really
+# loose about actually printing it out on errors.
+# I should (a) review what exit() actually does, and (b) get
+# consistent about printing out line numbers whenever I call that.
+
+
+
 # the first two args are normal scheme, the 3rd is only meant to be
 # used in parse functions, to store the line number.
 # TODO review, maybe i should have better names?
@@ -274,13 +278,10 @@ function dump_globals(		ptr, kv) {
 # barring that, just trying to grab the line number meaningfully and store
 # it when I can.
 
-function parse(		commands) {
-	# TODO as above, "commands" is a terrible name, that I should change
-	# for some reason i was imagining a command line
-
+function parse(		expressions) {
 	#dump_tokens() # for debugging
 
-	# to make this easier we'll imagine the commands as basically
+	# to make this easier we'll imagine the expressions as basically
 	# in an invisible top-level list.
 	# to parse them, we're going to stick a ) at the end then just use eat_list.
 	# eat_list should consume the ).
@@ -288,18 +289,18 @@ function parse(		commands) {
 
 	token_idx = 1 # reset to start of list
 
-	commands = eat_list_expression()
+	expressions = eat_list_expression()
 
 	# if there's anything left over, it's an error
 	if (!end_of_tokens()) {
-		print("Extra stuff at end of command sequence")
+		print("Extra stuff at end of expression sequence")
 		print("token index:", token_idx, "max index:", max_tokens)
 		dump_tokens()
 		token_error()
 		exit(1)
 	}
 
-	return commands
+	return expressions
 }
 
 
@@ -310,7 +311,8 @@ function parse(		commands) {
 # the expression is a list expression.
 # maybe "eat item" and "eat pair" or even "eat pair" and "eat nonpair".
 # or "complete pair" and "single"?  wtf
-
+# otoh, what the hell else are they?  how strict is the definition
+# of "expression"?
 
 # grabs one expression's-worth of tokens, and returns a Scheme object
 # of some kind or another.  it may return a ref to a parse tree of more
@@ -381,35 +383,34 @@ function eat_list_expression(	val, cdrval, lineno) {
 
 # TODO eval will almost certainly need to do the same no-recursion thing
 # that display() does.  Parsing too probably.
-# TODO "thing"?  probably should call it something like "expr"
 
-function eval(env, thing,		op, args, ref) {
+function eval(env, expr,		op, args, ref) {
 
 	# My sample repl will do this when trying to eval an empty list
 	# TODO confirm that this is correct behavior.
 	# note that (eval 3) returns 3, but (eval '()) is an error.
-	if (thing == NULL) {
+	if (expr == NULL) {
 		print("Ill-formed expression: trying to exec empty list")
 		exit(1)
 	}
 
 	# booleans and numbers and strings evaluate to themselves
-	if (is_boolean(thing) || is_number(thing) || is_string(thing)) {
-		return thing
+	if (is_boolean(expr) || is_number(expr) || is_string(expr)) {
+		return expr
 	}
 
-	if (!is_pair(thing)) {
+	if (!is_pair(expr)) {
 		# must be a variable, look it up to see if it's bound
-		ref = find_in_binding_list(thing, env)
+		ref = find_in_binding_list(expr, env)
 		if (ref == NULL) {
-			print("Unbound variable:", thing)
+			print("Unbound variable:", expr)
 			exit(1) # TODO I'm pretty sure all these calls to exit are wrong...
 		}
 		return car(cdr(ref))
 	}
 
 	# if it's a non-empty list, get the first element as an operator
-	op = car(thing)
+	op = car(expr)
 	# re: ^^^ at some point, i'd do:
 	#	- the value must be an atom
 	#	- look up the atom as a symbol, see if a func is bound to it
@@ -417,7 +418,7 @@ function eval(env, thing,		op, args, ref) {
 	# also -- it's not necessarily an operator, it could be syntax, etc.
 	# TODO think of a more generic name
 
-	args = cdr(thing)
+	args = cdr(expr)
 
 	# handling syntax, this is such a hack.
 	# TODO please, no more lists of keywords
@@ -566,11 +567,6 @@ function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings)
 
 
 
-# OK, deciding that the global environment is a list of lists
-# the interior list is the name/value pair
-# TODO move this comment somewhere useful
-
-
 function find_in_binding_list(id, list,		item) {
 	while(list != NULL) {
 		item = car(list)
@@ -584,13 +580,6 @@ function find_in_binding_list(id, list,		item) {
 	}
 	return NULL
 }
-
-
-# TODO it occurs to me that I'm implementing a lot of scheme-like
-# behavior, in awk, and to an extent that's inevitable, but I wonder if
-# I could end up moving some of this directly into scheme code that's
-# invoked by the interpreter.
-
 
 # this evaluates the individual arguments, before passing what
 # will hopefully be a list of primitives to the operator above.
