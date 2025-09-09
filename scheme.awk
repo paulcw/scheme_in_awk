@@ -41,6 +41,8 @@ END {
 	# decided to keep it separate here so i can wrap that debugging
 	# output around it.  later, may do that by wrapping with lambda statements,
 	# or more enhanced tracing if such exists.
+
+	# I feel like this main structure is too heavily weighted to the END loop.
 }
 
 
@@ -409,7 +411,8 @@ function eval(env, expr,		op, args, ref) {
 		return car(cdr(ref))
 	}
 
-	# if it's a non-empty list, get the first element as an operator
+	# at this point, it must be a non-empty list, so get the first element
+	# as an operator
 	op = car(expr)
 	# re: ^^^ at some point, i'd do:
 	#	- the value must be an atom
@@ -422,12 +425,17 @@ function eval(env, expr,		op, args, ref) {
 
 	# handling syntax, this is such a hack.
 	# TODO please, no more lists of keywords
-	if (op == "define" || op == "set!" || op == "let" || op == "let*") {
+	if (op == "define" || op == "set!" || op == "let" || op == "let*" || op == "lambda") {
 		return syntax(op, args, env)
 		# TODO I notice that the repl I'm using as a comparison,
 		# calls some of this stuff "macro".  are they actually using
 		# macros?  am i thinking about this wrong?
 	}
+	# interesting note, one thing that differentiates the above
+	# and the below (builtins and stored procs) is that the below
+	# doesn't take the environment (when handling the op) because
+	# they'd be lexically scoped. whereas above, in the 'syntax' stuff,
+	# we do need the environment
 
 	# assuming whatever else is a normal procedure application,
 	# so we evaluate all the args then apply the operator
@@ -442,21 +450,78 @@ function eval(env, expr,		op, args, ref) {
 		eval_args(env, args)
 	}
 
-	# for now, we only execute builtins.  in the future i expect the
-	# next line will only be a fallback.
+	# look up the operator to see if it's bound
+	ref = find_in_binding_list(op, env)
+	if (ref != NULL) {
+		return execute_stored_procedure(car(cdr(ref)), args)
+	}
+
+	# it's not clear to me whether to execute builtins first, and look
+	# up everything else, or do whta i'm doing above, which is to look
+	# up the operator first. TODO think more about this dude
+
+	# note that the builtins func is responsible for saying "unknown op"
+	# but in the future probably it should be the result of the above
+	# binding lookup TODO
+
+	# i think what i really want is for what's now in builtins, to be
+	# part of what's "syntax", somehow. the tricky part is knowing
+	# how to identify whether something was found.  and then we'll
+	# try to look up a binding, and then we'll thow up a "not found"
+	# message as final versoin TODO
+	# but note that some things can just go into memroy as default
+	# funcs, like I'm doing with + now, hopefully.
 	return builtins(op, args)
 }
 
 
-function eval_list(env, list,		expr) {
+function eval_list(env, list,		expr, result) {
 	while(list != NULL) {
 		expr = car(list)
-		eval(env, expr)
+		result = eval(env, expr)
 		list = cdr(list)
 	}
+	return result # the return value of a list is the value of the last elt
 }
 
 
+# execute user-defined procedure TODO i should probably rename this
+function execute_stored_procedure(proc, args,	formals, env) {
+	# note that in a stored procedure, we use the environment as
+	# the proc was defined, i.e., it's lexically scoped.
+	# we don't take the env as an argument
+
+	if (!is_pair(proc)) {
+		print("Not a procedure!")
+		exit(1)
+	}
+
+	# OK, let's assume a stored command is a list with these parts:
+	# - a ptr to the env
+	# - an arg list
+	# - a list of commands
+	# this is not unlike a let expression
+
+	if (proc == NULL || one_elt_list(proc) || two_elt_list(proc)) {
+		print("error: mis-defined proc")
+		exit(1)
+	}
+	env = car(proc)
+	formals = car(cdr(proc))
+
+	# construct a new env with the arguments in front
+	while(formals != NULL) {
+		if (args == NULL) {
+			print("not enough arguments")
+			exit(1)
+		}
+		env = cons(cons(car(formals), cons(car(args), NULL)), env)
+		formals = cdr(formals)
+		args = cdr(args)
+	}
+	# now execute the body of the proc
+	return eval_list(env, cdr(cdr(proc)))
+}
 
 
 # i call this "syntax" because I expect it will be used
@@ -526,7 +591,7 @@ function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings)
 			newbindings = cons(cons(car(b), cons(eval(env, car(cdr(b))), NULL)), newbindings)
 			bindingdefs = cdr(bindingdefs)
 		}
-		eval_list(newbindings, cdr(args))
+		return eval_list(newbindings, cdr(args))
 	} else if (op == "let*") {
 		if (args == NULL || one_elt_list(args)) {
 			print("error: let but no bindings and/or no body")
@@ -547,7 +612,23 @@ function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings)
 			newbindings = cons(cons(car(b), cons(eval(newbindings, car(cdr(b))), NULL)), newbindings)
 			bindingdefs = cdr(bindingdefs)
 		}
-		eval_list(newbindings, cdr(args))
+		return eval_list(newbindings, cdr(args))
+
+	} else if (op == "lambda") {
+		# for now, only doing the kind where there's a list of formals
+		if (args == NULL) {
+			print("error: empty lambda")
+			# otherwise i'm going to allow empty bodies in case you want
+			# to define no-op funcs; TODO see if this is allowed in spec
+			exit(0)
+		}
+
+		# a stored command is a list with these parts:
+		# - a ptr to the env
+		# - an arg list
+		# - a list of commands
+		# and I think we get all that just by doing the following??
+		return cons(env, args)
 
 	} else {
 		print("somehow you called this with an unsupported syntax:", op)
