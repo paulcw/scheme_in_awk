@@ -425,7 +425,7 @@ function eval(env, expr,		op, args, ref) {
 
 	# handling syntax, this is such a hack.
 	# TODO please, no more lists of keywords
-	if (op == "define" || op == "set!" || op == "let" || op == "let*" || op == "lambda") {
+	if (op == "define" || op == "set!" || op == "let" || op == "let*" || op == "lambda" || op == "quote") {
 		return syntax(op, args, env)
 		# TODO I notice that the repl I'm using as a comparison,
 		# calls some of this stuff "macro".  are they actually using
@@ -436,6 +436,9 @@ function eval(env, expr,		op, args, ref) {
 	# doesn't take the environment (when handling the op) because
 	# they'd be lexically scoped. whereas above, in the 'syntax' stuff,
 	# we do need the environment
+	# or, maybe the distinction is that we shouldn't evaluate
+	# all the arguments before applying function, in the above cases?
+	# TODO think about the semantics here
 
 	# assuming whatever else is a normal procedure application,
 	# so we evaluate all the args then apply the operator
@@ -444,16 +447,22 @@ function eval(env, expr,		op, args, ref) {
 	# evaluating them (replacing expressions with their values). TODO
 	# in the future, I expect to find that this won't work and we'll
 	# need to make copies.
-	if (op != "quote") {
-		# we don't recursively evaluate the args inside a quoted thing.
-		# that misses the point of quoting
-		eval_args(env, args)
+	eval_args(env, args)
+
+	# OK, what I want to do in the future is inline these functions
+	# as builtins, executed in a similar way to user-defined functions.
+	# but in the meantime, here's another hack:
+	if (op == "print" || op == "+" || op == "cons" || op == "car" || op == "cdr" || op == "eval" || op == "null?" || op == "pair?" || op == "atom?" || op == "boolean?" || op == "number?" || op == "string?" || op == "eq?" || op == "dump_globals") {
+		return builtins(op, args)
+		# note interesting thing: nothing in there needs the env
 	}
 
 	# look up the operator to see if it's bound
-	ref = find_in_binding_list(op, env)
+	ref = eval(env, op)
+	# note that the above will end the program if it's unbound.
+	# TODO this may be wrong...
 	if (ref != NULL) {
-		return execute_stored_procedure(car(cdr(ref)), args)
+		return execute_stored_procedure(ref, args)
 	}
 
 	# it's not clear to me whether to execute builtins first, and look
@@ -471,7 +480,6 @@ function eval(env, expr,		op, args, ref) {
 	# message as final versoin TODO
 	# but note that some things can just go into memroy as default
 	# funcs, like I'm doing with + now, hopefully.
-	return builtins(op, args)
 }
 
 
@@ -630,6 +638,15 @@ function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings)
 		# and I think we get all that just by doing the following??
 		return cons(env, args)
 
+	} else if (op == "quote") {
+		# quote takes a single argument, which is the thing being
+		# quoted (which means in particular, not executed or expanded)
+		if (!one_elt_list(args)) {
+			print("wrong number of arguments line", DEBUG[args])
+			exit(1)
+		}
+		return car(args)
+
 	} else {
 		print("somehow you called this with an unsupported syntax:", op)
 	}
@@ -690,15 +707,6 @@ function builtins(op, list) {
 		# TODO this feel inelegant, having to go through the operator
 		# lookup again.  can i clean this up?  like having a separate builtin
 		# add func that can loop and/or recurse itself?
-
-	} else if (op == "quote") {
-		# quote takes a single argument, which is the thing being
-		# quoted (which means in particular, not executed or expanded)
-		if (!one_elt_list(list)) {
-			print("wrong number of arguments line", DEBUG[list])
-			exit(1)
-		}
-		return car(list)
 
 	} else if (op == "cons") {
 		if (!two_elt_list(list)) {
@@ -808,10 +816,6 @@ function builtins(op, list) {
 
 	} else if (op == "dump_globals") {
 		dump_globals()
-
-	} else {
-		print("unknown op:", op)
-		exit(1)
 	}
 }
 
