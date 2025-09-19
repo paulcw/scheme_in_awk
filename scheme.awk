@@ -414,17 +414,15 @@ function eval(env, expr,		op, args, ref) {
 	# at this point, it must be a non-empty list, so get the first element
 	# as an operator
 	op = car(expr)
-	# re: ^^^ at some point, i'd do:
-	#	- the value must be an atom
-	#	- look up the atom as a symbol, see if a func is bound to it
-	# but it's all hardcoded for now
-	# also -- it's not necessarily an operator, it could be syntax, etc.
-	# TODO think of a more generic name
+	# TODO think of a more generic name,
+	# it's not necessarily an operator, it could be syntax, etc.
 
 	args = cdr(expr)
 
 	# handling syntax, this is such a hack.
-	# TODO please, no more lists of keywords
+	# TODO i hate these lists of keywords
+	#	but i can't think of a more elegant solution within pure awk,
+	#	and using c or gawk extensions feels like a cheat.
 	if (op == "define" || op == "set!" || op == "let" || op == "let*" || op == "lambda" || op == "quote") {
 		return syntax(op, args, env)
 		# TODO I notice that the repl I'm using as a comparison,
@@ -443,15 +441,17 @@ function eval(env, expr,		op, args, ref) {
 	# assuming whatever else is a normal procedure application,
 	# so we evaluate all the args then apply the operator
 
-	# next, if not a quote we DESTRUCTIVELY go through the list of args,
-	# evaluating them (replacing expressions with their values). TODO
-	# in the future, I expect to find that this won't work and we'll
-	# need to make copies.
-	eval_args(env, args)
+	# next, go through the list of args, evaluating them in a new list
 
+	args = eval_args(env, args)
 	# OK, what I want to do in the future is inline these functions
 	# as builtins, executed in a similar way to user-defined functions.
 	# but in the meantime, here's another hack:
+	# TODO i really hate this (see above), but I don't see a good alternative
+	# without leaving awk and getting into a more powerful language, which
+	# largely misses the point of this exercise (see slightly less above).
+	# i could probably put these keywords in a map to make the test more
+	# elegant but that's not much of a solution.
 	if (op == "print" || op == "+" || op == "cons" || op == "car" || op == "cdr" || op == "eval" || op == "null?" || op == "pair?" || op == "atom?" || op == "boolean?" || op == "number?" || op == "string?" || op == "eq?" || op == "dump_globals") {
 		return builtins(op, args)
 		# note interesting thing: nothing in there needs the env
@@ -514,28 +514,43 @@ function execute_stored_procedure(proc, args,	formals, env) {
 		print("error: mis-defined proc")
 		exit(1)
 	}
+
 	env = car(proc)
 	formals = car(cdr(proc))
 
 	# construct a new env with the arguments in front
 	while(formals != NULL) {
-		if (args == NULL) {
-			print("not enough arguments")
+		if (is_pair(formals)) {
+			if (args == NULL) {
+				print("not enough arguments")
+				exit(1)
+			}
+			env = cons(cons(car(formals), cons(car(args), NULL)), env)
+			formals = cdr(formals)
+			args = cdr(args)
+		} else if (is_number(formals) || is_string(formals) || is_boolean(formals)) {
+			print("bad parameter: ", formals)
 			exit(1)
+		} else {
+			env = cons(cons(formals, cons(copy_list(args), NULL)), env)
+			formals = NULL
+			args = NULL
 		}
-		env = cons(cons(car(formals), cons(car(args), NULL)), env)
-		formals = cdr(formals)
-		args = cdr(args)
 	}
+	if (args != NULL) {
+		print("too many arguments")
+		exit(1)
+	}
+
 	# now execute the body of the proc
 	return eval_list(env, cdr(cdr(proc)))
 }
 
 
 # i call this "syntax" because I expect it will be used
-# to handle syntactical things, but so far it only handles define and set!
-# one intersting thing is that i think "let" returns values, it's like
-# an expression, but "define" and "set!" I think don't.  maybe these
+# to handle syntactical things.
+# one interesting thing is that "let" returns values, it's like
+# an expression, but "define" and "set!" don't.  maybe these
 # should be handled by different funcs? TODO
 function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings) {
 	# only allowing define on the top level
@@ -679,16 +694,38 @@ function find_in_binding_list(id, list,		item) {
 	return NULL
 }
 
-# this evaluates the individual arguments, before passing what
-# will hopefully be a list of primitives to the operator above.
-# It's destructive, destroying the list!  It will probably eventually
-# need to be a copy.
+
+# two functions that copy lists, but one evalutes each member,
+# and the other doesn't, it just copies.
+# TODO I feel like they should be combined, simplified somehow
+# but can't think of a clear way of doing that now.
+# I mean the obvious way is to always call eval, but in the copy-only
+# version quote every element so it ends up the same, but i'm not
+# convinced that'll be any nicer.
+
+
+# this evaluates the individual arguments sent to a procedure
+# being invoked in eval(), ultimately passing what
+# will hopefully be a list of primitives to the operator.
 function eval_args(env, list) {
-	if (list != NULL) {
-		store_car(list, eval(env, car(list)))
-		eval_args(env, cdr(list))
+	if (list == NULL) {
+		return NULL
 	}
+	return cons(eval(env, car(list)), eval_args(env, cdr(list)))
 }
+
+function copy_list(lst,		out) {
+	if (lst == NULL) {
+		return NULL
+	}
+	return cons(car(lst), copy_list(cdr(lst)))
+}
+# TODO note that these will use up stack to the size of the list,
+# and we're limited to 1024 frames given that artificial restriction.
+# it's not impossible that list length + depth in stack so far would
+# be greater than 1024.
+# could build the stack into these funcs explicitly, though it's
+# less clear how in the case of eval_args.  should be trivial in copy_list
 
 
 function builtins(op, list) {
