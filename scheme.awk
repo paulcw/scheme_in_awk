@@ -452,7 +452,7 @@ function eval(env, expr,		op, args, ref) {
 	# largely misses the point of this exercise (see slightly less above).
 	# i could probably put these keywords in a map to make the test more
 	# elegant but that's not much of a solution.
-	if (op == "print" || op == "+" || op == "cons" || op == "car" || op == "cdr" || op == "eval" || op == "null?" || op == "pair?" || op == "atom?" || op == "boolean?" || op == "number?" || op == "string?" || op == "eq?" || op == "dump_globals") {
+	if (op == "print" || op == "+" || op == "cons" || op == "car" || op == "cdr" || op == "eval" || op == "null?" || op == "pair?" || op == "and" || op == "or" || op == "not" || op == "boolean?" || op == "number?" || op == "string?" || op == "eq?" || op == "dump_globals") {
 		return builtins(op, args)
 		# note interesting thing: nothing in there needs the env
 	}
@@ -465,20 +465,12 @@ function eval(env, expr,		op, args, ref) {
 		return execute_stored_procedure(ref, args)
 	}
 
-	# it's not clear to me whether to execute builtins first, and look
-	# up everything else, or do whta i'm doing above, which is to look
-	# up the operator first. TODO think more about this dude
-
-	# note that the builtins func is responsible for saying "unknown op"
-	# but in the future probably it should be the result of the above
-	# binding lookup TODO
-
 	# i think what i really want is for what's now in builtins, to be
 	# part of what's "syntax", somehow. the tricky part is knowing
 	# how to identify whether something was found.  and then we'll
 	# try to look up a binding, and then we'll thow up a "not found"
-	# message as final versoin TODO
-	# but note that some things can just go into memroy as default
+	# message as final version TODO
+	# but note that some things can just go into memory as default
 	# funcs, like I'm doing with + now, hopefully.
 }
 
@@ -798,18 +790,33 @@ function builtins(op, list) {
 		}
 		return "#f"
 
-	} else if (op == "atom?") {
-		if (!one_elt_list(list)) {
-			print("wrong number of arguments line", DEBUG[list])
-			exit(1)
-		}
-		# I defined this like a builtin but just because it appeared
-		# in "The Little Schemer", but it's not actually a standard func.
-		# TODO remove probably
-		if (is_pair(car(list))) {
-			return "#f"
+	} else if (op == "and") {
+		while (list != NULL) {
+			if (car(list) == "#f") {
+				return "#f"
+			}
+			list = cdr(list)
 		}
 		return "#t"
+
+	} else if (op == "or") {
+		while (list != NULL) {
+			if (car(list) != "#f") {
+				return "#t"
+			}
+			list = cdr(list)
+		}
+		return "#f"
+
+	} else if (op == "not") {
+		if (!one_elt_list(list)) {
+			print("wrong number of /bad arguments line", DEBUG[list])
+			exit(1)
+		}
+		if (car(list) == "#f") {
+				return "#t"
+		}
+		return "#f"
 
 	} else if (op == "boolean?") {
 		if (!one_elt_list(list)) {
