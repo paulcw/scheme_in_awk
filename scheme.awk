@@ -452,7 +452,7 @@ function eval(env, expr,		op, args, ref) {
 	# largely misses the point of this exercise (see slightly less above).
 	# i could probably put these keywords in a map to make the test more
 	# elegant but that's not much of a solution.
-	if (op == "print" || op == "+" || op == "cons" || op == "car" || op == "cdr" || op == "eval" || op == "null?" || op == "pair?" || op == "and" || op == "or" || op == "not" || op == "boolean?" || op == "number?" || op == "string?" || op == "eq?" || op == "dump_globals") {
+	if (op == "print" || op == "+" || op == "cons" || op == "car" || op == "cdr" || op == "eval" || op == "null?" || op == "pair?" || op == "and" || op == "or" || op == "not" || op == "boolean?" || op == "number?" || op == "string?" || op == "eq?" || op == "dump_globals" || op == ">" || op == "<" || op == "=") {
 		return builtins(op, args)
 		# note interesting thing: nothing in there needs the env
 	}
@@ -720,7 +720,7 @@ function copy_list(lst,		out) {
 # less clear how in the case of eval_args.  should be trivial in copy_list
 
 
-function builtins(op, list) {
+function builtins(op, list,		val) {
 
 	if (op == "print") {
 		display(list) # TODO this will necessarily print a list (of the args)
@@ -729,13 +729,51 @@ function builtins(op, list) {
 						# and print each.
 
 	} else if (op == "+") {
-		if (list == NULL) {
-			return 0
+		val = 0
+		while (list != NULL) {
+			val = val + car(list)
+			list = cdr(list)
 		}
-		return car(list) + builtins(op, cdr(list))
-		# TODO this feel inelegant, having to go through the operator
-		# lookup again.  can i clean this up?  like having a separate builtin
-		# add func that can loop and/or recurse itself?
+		return val
+
+	} else if (op == "<") {
+		if (list == NULL || one_elt_list(list)) {
+			return "#t"
+		}
+		do {
+			val = car(list)
+			list = cdr(list)
+			if (car(list) <= val) {
+				return "#f"
+			}
+		} while (cdr(list) != NULL)
+		return "#t"
+
+	} else if (op == ">") {
+		if (list == NULL || one_elt_list(list)) {
+			return "#t"
+		}
+		do {
+			val = car(list)
+			list = cdr(list)
+			if (car(list) >= val) {
+				return "#f"
+			}
+		} while (cdr(list) != NULL)
+		return "#t"
+
+	} else if (op == "=") {
+		if (list == NULL || one_elt_list(list)) {
+			return "#t"
+		}
+		do {
+			val = car(list)
+			list = cdr(list)
+			if (car(list) != val) {
+				return "#f"
+			}
+		} while (cdr(list) != NULL)
+		return "#t"
 
 	} else if (op == "cons") {
 		if (!two_elt_list(list)) {
@@ -759,14 +797,14 @@ function builtins(op, list) {
 		return cdr(car(list))
 
 	} else if (op == "eval") {
-		# apparently in real scheme (?), there can be another argument
+		# apparently in real scheme (?), there needs to be another argument
 		# which is an environment specifier... but I'm not going to support
 		# that for now TODO add this?
 		if (!one_elt_list(list)) {
 			print("wrong number of /bad arguments line", DEBUG[list])
 			exit(1)
 		}
-		return eval(env, car(list))
+		return eval(GLOBALS, car(list)) # TODO really we need that env spec, just defaulting to globals for now
 
 	} else if (op == "null?") {
 		if (!one_elt_list(list)) {
@@ -861,6 +899,15 @@ function builtins(op, list) {
 	} else if (op == "dump_globals") {
 		dump_globals()
 	}
+
+# TODO can i use a switch, this is getting out of hand
+# though even that isn't particularly elegant
+# -- well, not commonly.  gawk has it but gawk feels like cheating
+# at this point.  continue thinking about this...
+# currently i'm leaning towards grouping builtins into similar functions
+# (so they can have a smaller set of shared tmp vars)
+# then this func would just be the glue but that's still just a more
+# elegantly implemented hack
 }
 
 
