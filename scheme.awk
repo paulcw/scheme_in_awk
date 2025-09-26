@@ -423,7 +423,7 @@ function eval(env, expr,		op, args, ref) {
 	# TODO i hate these lists of keywords
 	#	but i can't think of a more elegant solution within pure awk,
 	#	and using c or gawk extensions feels like a cheat.
-	if (op == "define" || op == "set!" || op == "let" || op == "let*" || op == "lambda" || op == "quote") {
+	if (op == "define" || op == "set!" || op == "let" || op == "let*" || op == "lambda" || op == "quote" || op == "cond") {
 		return syntax(op, args, env)
 		# TODO I notice that the repl I'm using as a comparison,
 		# calls some of this stuff "macro".  are they actually using
@@ -544,7 +544,7 @@ function execute_stored_procedure(proc, args,	formals, env) {
 # one interesting thing is that "let" returns values, it's like
 # an expression, but "define" and "set!" don't.  maybe these
 # should be handled by different funcs? TODO
-function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings) {
+function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings, clause) {
 	# only allowing define on the top level
 	# for future versions, defines at the start of a block could maybe
 	# be turned into an implicit LET* TODO later maybe (i think it will be
@@ -653,6 +653,30 @@ function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings)
 			exit(1)
 		}
 		return car(args)
+
+	} else if (op == "cond") {
+		if (args == NULL || one_elt_list(args)) {
+			print("wrong number of arguments line", DEBUG[args])
+			exit(1)
+		}
+		while(args != NULL) {
+			clause = car(args)
+			if (!is_pair(clause)) {
+				print("not a clause!", DEBUG[args])
+				exit(1)
+			}
+			# Note: I'm not doing that whole "=>" syntax for now TODO
+			if (car(clause) == "else") {
+				if (cdr(args) != NULL) {
+					print("can't have an else that's not last")
+					exit(1)
+				}
+				return eval_list(env, cdr(clause))
+			} else if (eval(env, car(clause)) != "#f") {
+				return eval_list(env, cdr(clause))
+			}
+			args = cdr(args)
+		}
 
 	} else {
 		print("somehow you called this with an unsupported syntax:", op)
