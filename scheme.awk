@@ -33,7 +33,7 @@ END {
 		print("EXPRESSION:")
 		display(expr)
 		print("RESULT IS:")
-		display(eval(GLOBALS, expr))
+		display(eval(NULL, expr)) # for now, null env means top env
 		print("\n----")
 		expressions = cdr(expressions)
 	}
@@ -160,6 +160,15 @@ function token_error() {
 # you need a SINGLE POSITION (not sure how true this will be), so you
 # take it from this global then immediately increment it.
 
+# TODO I've really hand-waved the nesting of environments.
+# basically I just make a big linked lists of k/v pairs.
+# each of which end by pointing to the next highest level.
+# there's no sense of a clear delination of levels, which can
+# be important in things like "define" or "set!".  As long as I don't
+# use these mutatorish crap it should be safe, I think, but I'm going
+# to have to clean this up later.
+
+
 function init_memory() {
 	# sets global variables we need for memory
 	NULL = "|0"
@@ -174,9 +183,12 @@ function init_memory() {
 	# global vars will go into a list called GLOBALS.
 	# this will be directly modified when things are added to it.
 	# i may have to change this later, it feels like a horrible hack.
-	# I expect that local environments will point to it to continue
-	# their own lists.
-	# Eventually, builtins etc will probably go into this list.
+	# Note that it isn't used as the tail end of a series of environments,
+	# as it was in an previous version.
+	# it's a kind of additional environment that can always be searched.
+	# So we use it in set/define and lookups, and nowhere else.
+	# TODO think about this...
+	# Ideally it may be someday initialized with standard library stuff.
 	GLOBALS = NULL
 }
 
@@ -556,21 +568,35 @@ function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings,
 			# I don't think exit does what I expect it to, but I keep calling it TODO fix
 			exit(1)
 		}
-		if (op == "define" && env != GLOBALS) {
+		if (op == "define" && env != NULL) {
 			print("Can only use define on top level")
+			# TODO using NULL as a flag for the env being at the top
+			# env level, sucks.  It can't differentiate between top level,
+			# and lower levels that just don't happen to define new vals.
 			exit(1)
 		}
+		# ^^^^ TODO i can get rid of this, i think, if i just make
+		# define always add at the end
+		# oh, but "at the end" doesn't make sense if the list starts empty.
+		# maybe i can hack around that.  but anyway the problem is
+		# that redefining the env to start with a new value, doesn't work,
+		# if it's not global, because there'd be no way to tell the caller
+		# the new env value (if it's not GLOBAL, which is itself global)
+		# this is part of the whole env mess that I mention above.
+		# I need a cleaner, more formal delineation of these... think about
+		# this more when I get to impl'ing letrec.
+
 		id = car(args)
 		expr = car(cdr(args))
 		ref = find_in_binding_list(id, env)
 		if (ref == NULL) {
 			if (op == "set!") {
 				print(id, "not bound for set!")
+				# TODO wait, will find die before we even get here?
 				exit(1)
 			} else if (op == "define") {
 				val = eval(env, expr)
-				GLOBALS = cons(cons(id, cons(val, NULL)), env)
-				env = GLOBALS
+				GLOBALS = cons(cons(id, cons(val, NULL)), GLOBALS)
 			}
 		} else {
 			val = eval(env, expr)
@@ -609,7 +635,7 @@ function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings,
 		return eval_list(newbindings, cdr(args))
 	} else if (op == "let*") {
 		if (args == NULL || one_elt_list(args)) {
-			print("error: let but no bindings and/or no body")
+			print("error: let* but no bindings and/or no body")
 			exit(1)
 		}
 		bindingdefs = car(args)
@@ -701,6 +727,18 @@ function find_in_binding_list(id, list,		item) {
 		item = car(list)
 		if (item == NULL) {
 			print("There shouldn't be a null item here, but there is:", list)
+		}
+		if (car(item) == id) {
+			return item
+		}
+		list = cdr(list)
+	}
+	# didn't find in env, try globals
+	list = GLOBALS
+	while(list != NULL) {
+		item = car(list)
+		if (item == NULL) {
+			print("There shouldn't be a null item here (globals), but there is:", list)
 		}
 		if (car(item) == id) {
 			return item
