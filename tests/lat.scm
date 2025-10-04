@@ -6,3 +6,4 @@
 			((atom? (car x)) (lat? (cdr x)))
 			(else #f))))
 (lat? '(bacon and eggs))
+(lat? '(bacon (and eggs)))
