@@ -21,6 +21,7 @@ END {
 	#dump_tokens()
 
 	init_memory()
+	load_builtins()
 	expressions = parse()
 
 	print("heap:")
@@ -265,7 +266,22 @@ function dump_globals(		ptr, kv) {
 	}
 }
 
-
+function load_builtins(		op, idx, builtinnames) {
+	# load the globals with entries for builtins.
+	# all the builtins do is trigger another function to figure out
+	# which is which and invoke awk code.  This is marginally
+	# more elegant than what I had before, I hope.
+	split("print + cons car cdr eval null? pair? and or not boolean? number? string? eq? dump_globals > < =", builtinnames)
+	for (idx in builtinnames) {
+		op = builtinnames[idx]
+		GLOBALS = cons(cons(op, cons("|BUILTIN", NULL)), GLOBALS)
+	}
+	# you know, i could just make builtins() func return some flag
+	# value if the op isn't found in its switch, and then always
+	# invoke it, and skip all of the above...
+	# and at this point, i'm not convinced the above is any easier than that.
+	# TODO yeah let's do that, later.  i'm just searching everything twice now
+}
 
 
 ###########
@@ -394,15 +410,13 @@ function eat_list_expression(	val, cdrval, lineno) {
 # EVALUATION #
 ##############
 
-
-# TODO eval will almost certainly need to do the same no-recursion thing
-# that display() does.  Parsing too probably.
-
 function eval(env, expr,		op, args, ref) {
 
 	# My sample repl will do this when trying to eval an empty list
 	# TODO confirm that this is correct behavior.
-	# note that (eval 3) returns 3, but (eval '()) is an error.
+	# note that (eval 3) returns 3, but (eval '()) is an errors,
+	# because after the arg is evaluated, evaluating an empty list is an error.
+
 	if (expr == NULL) {
 		print("Ill-formed expression: trying to exec empty list")
 		exit(1)
@@ -420,7 +434,7 @@ function eval(env, expr,		op, args, ref) {
 			print("Unbound variable:", expr)
 			exit(1) # TODO I'm pretty sure all these calls to exit are wrong...
 		}
-		return car(cdr(ref))
+		return car(cdr(ref)) # i.e., return the value of the binding
 	}
 
 	# at this point, it must be a non-empty list, so get the first element
@@ -441,14 +455,6 @@ function eval(env, expr,		op, args, ref) {
 		# calls some of this stuff "macro".  are they actually using
 		# macros?  am i thinking about this wrong?
 	}
-	# interesting note, one thing that differentiates the above
-	# and the below (builtins and stored procs) is that the below
-	# doesn't take the environment (when handling the op) because
-	# they'd be lexically scoped. whereas above, in the 'syntax' stuff,
-	# we do need the environment
-	# or, maybe the distinction is that we shouldn't evaluate
-	# all the arguments before applying function, in the above cases?
-	# TODO think about the semantics here
 
 	# assuming whatever else is a normal procedure application,
 	# so we evaluate all the args then apply the operator
@@ -456,34 +462,29 @@ function eval(env, expr,		op, args, ref) {
 	# next, go through the list of args, evaluating them in a new list
 
 	args = eval_args(env, args)
-	# OK, what I want to do in the future is inline these functions
-	# as builtins, executed in a similar way to user-defined functions.
-	# but in the meantime, here's another hack:
-	# TODO i really hate this (see above), but I don't see a good alternative
-	# without leaving awk and getting into a more powerful language, which
-	# largely misses the point of this exercise (see slightly less above).
-	# i could probably put these keywords in a map to make the test more
-	# elegant but that's not much of a solution.
-	if (op == "print" || op == "+" || op == "cons" || op == "car" || op == "cdr" || op == "eval" || op == "null?" || op == "pair?" || op == "and" || op == "or" || op == "not" || op == "boolean?" || op == "number?" || op == "string?" || op == "eq?" || op == "dump_globals" || op == ">" || op == "<" || op == "=") {
-		return builtins(op, args)
-		# note interesting thing: nothing in there needs the env
-	}
+
+
+	# note interesting thing: nothing following needs the env
+	# (unless maybe there'll be a way to deliberately use non-lexical scoping?)
+
 
 	# look up the operator to see if it's bound
 	ref = eval(env, op)
 	# note that the above will end the program if it's unbound.
-	# TODO this may be wrong...
-	if (ref != NULL) {
+	# TODO this may not be the behavior i want
+	if (ref == "|BUILTIN") {
+		return builtins(op, args)
+	} else if (is_pair(proc)) {
+		# we're assuming that any binding to a pair is being executed
+		# must be a binding to a stored procedure.  this could actually
+		# be thwarted by sufficiently cleverly buggy code, pretty easily
+		# actually.  TODO maybe use some internal sentinel value
+		# to prevent this.
 		return execute_stored_procedure(ref, args)
 	}
 
-	# i think what i really want is for what's now in builtins, to be
-	# part of what's "syntax", somehow. the tricky part is knowing
-	# how to identify whether something was found.  and then we'll
-	# try to look up a binding, and then we'll thow up a "not found"
-	# message as final version TODO
-	# but note that some things can just go into memory as default
-	# funcs, like I'm doing with + now, hopefully.
+	print("Don't know how to evaluate", op)
+	exit(1)
 }
 
 
@@ -502,11 +503,6 @@ function execute_stored_procedure(proc, args,	formals, env) {
 	# note that in a stored procedure, we use the environment as
 	# the proc was defined, i.e., it's lexically scoped.
 	# we don't take the env as an argument
-
-	if (!is_pair(proc)) {
-		print("Not a procedure!")
-		exit(1)
-	}
 
 	# OK, let's assume a stored command is a list with these parts:
 	# - a ptr to the env
