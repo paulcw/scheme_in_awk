@@ -271,7 +271,7 @@ function load_builtins(		op, idx, builtinnames) {
 	# all the builtins do is trigger another function to figure out
 	# which is which and invoke awk code.  This is marginally
 	# more elegant than what I had before, I hope.
-	split("print + - * / cons car cdr eval null? pair? and or not boolean? number? string? eq? dump_globals > < =", builtinnames)
+	split("print + - * / zero? cons car cdr eval null? pair? and or not boolean? number? string? eq? dump_globals > < =", builtinnames)
 	for (idx in builtinnames) {
 		op = builtinnames[idx]
 		GLOBALS = cons(cons(op, cons("|BUILTIN", NULL)), GLOBALS)
@@ -882,6 +882,16 @@ function builtins(op, list,		val) {
 			}
 		} while (cdr(list) != NULL)
 		return "#t"
+
+	} else if (op == "zero?") {
+		if (!one_elt_list(list)) {
+			print("bad number of arguments")
+			exit(1)
+		}
+		if (car(list) == 0) {
+			return "#t"
+		}
+		return "#f"
 
 	} else if (op == "cons") {
 		if (!two_elt_list(list)) {
