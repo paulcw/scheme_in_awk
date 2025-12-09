@@ -77,6 +77,10 @@ to have printed out.
 
 ## Notes
 
+- I haven't yet written or applied a formal unit test system yet,
+	and it has recently reached the level of complexity where that
+	can bite you in the ass.  I probably need to do that next, but
+	this is hitting against the limit of Fun.  Maybe this is a sign.
 - There is no garbage collection.
 	It's not even clear to me whether garbage collection means anything
 	considering that the memory is Awk arrays.  How does one reclaim
