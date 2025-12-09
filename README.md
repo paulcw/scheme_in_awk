@@ -73,7 +73,9 @@ such that Scheme5 would be a superset of Scheme7, or if they're
 just trying to isolate extensions to that into something "big", or what.
 But anyway, maybe for funsies we can try implementing Scheme7small.
 Or maybe I'll just go back to Scheme5 because that's the manual I happen
-to have printed out.
+to have printed out.  In any event, I have no intention of doing whatever
+the "big" version of the language would be -- Scheme6?  Scheme8, which
+I presume would be Scheme6 minus Scheme7?  God I love standards.
 
 ## Notes
 
