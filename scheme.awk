@@ -474,7 +474,7 @@ function eval(env, expr,		op, args, ref) {
 	# TODO this may not be the behavior i want
 	if (ref == "|BUILTIN") {
 		return builtins(op, args)
-	} else if (is_pair(proc)) {
+	} else if (is_pair(ref)) {
 		# we're assuming that any binding to a pair is being executed
 		# must be a binding to a stored procedure.  this could actually
 		# be thwarted by sufficiently cleverly buggy code, pretty easily
