@@ -193,7 +193,7 @@ function init_memory() {
 	GLOBALS = NULL
 }
 
-function get_memory_cell() {
+function allocate_memory_cell() {
 	return sprintf("|%d", HEAP_IDX++)
 }
 
@@ -227,7 +227,7 @@ function cdr(loc) {
 # used in parse functions, to store the line number.
 # TODO review, maybe i should have better names?
 function cons(first, rest, debuginfo,		loc) {
-	loc = get_memory_cell()
+	loc = allocate_memory_cell()
 	store_car(loc, first)
 	store_cdr(loc, rest)
 	if (debuginfo) {
@@ -449,7 +449,7 @@ function eval(env, expr,		op, args, ref) {
 	# TODO i hate these lists of keywords
 	#	but i can't think of a more elegant solution within pure awk,
 	#	and using c or gawk extensions feels like a cheat.
-	if (op == "define" || op == "set!" || op == "let" || op == "let*" || op == "lambda" || op == "quote" || op == "cond") {
+	if (op == "define" || op == "set!" || op == "let" || op == "let*" || op == "letrec" || op == "lambda" || op == "quote" || op == "cond" || op == "if") {
 		return syntax(op, args, env)
 		# TODO I notice that the repl I'm using as a comparison,
 		# calls some of this stuff "macro".  are they actually using
@@ -470,6 +470,8 @@ function eval(env, expr,		op, args, ref) {
 
 	# look up the operator to see if it's bound
 	ref = eval(env, op)
+#print("i fucking hate you", op, ref)
+#display(env)
 	# note that the above will end the program if it's unbound.
 	# TODO this may not be the behavior i want
 	if (ref == "|BUILTIN") {
@@ -552,7 +554,7 @@ function execute_stored_procedure(proc, args,	formals, env) {
 # one interesting thing is that "let" returns values, it's like
 # an expression, but "define" and "set!" don't.  maybe these
 # should be handled by different funcs? TODO
-function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings, clause) {
+function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, bd, newbindings, clause, predicate) {
 	# only allowing define on the top level
 	# for future versions, defines at the start of a block could maybe
 	# be turned into an implicit LET* TODO later maybe (i think it will be
@@ -651,6 +653,46 @@ function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings,
 		}
 		return eval_list(newbindings, cdr(args))
 
+	} else if (op == "letrec") {
+		if (args == NULL || one_elt_list(args)) {
+			print("error: letrec but no bindings and/or no body")
+			exit(1)
+		}
+		bindingdefs = car(args)
+		newbindings = env
+		# we need to create the bindings in two parts, once to
+		# create a simple entry, and once to set its value.
+		# NOTE: the first pass way I'm planning to do this (below),
+		# may break if the same variable is defined twice, but I'm
+		# pretty sure it would break anyway. TODO maybe add detection?
+		# find out if there's a standard behavior for this?
+		while (bindingdefs != NULL) {
+			bd = car(bindingdefs)
+			if (!two_elt_list(bd)) {
+				print("error: bindings need 2 elts")
+				exit(1)
+			}
+			# create a new binding, which is a one-elt list, and add it to the
+			# front of new list of bindings (which ends by connecting to
+			# existing env), but don't actually evaluate thing value yet.
+			newbindings = cons(cons(car(bd), NULL), newbindings)
+			bindingdefs = cdr(bindingdefs)
+		}
+		# now go through and evaluate the binding values and assign
+		# them to the already existing bindings.
+		# note that newbindings now points to the list of all bindings,
+		# including the original environment at the end.
+		bindingdefs = car(args)
+		while (bindingdefs != NULL) {
+			bd = car(bindingdefs)
+			# evaluate the value of the binding and assign it.
+			b = find_in_binding_list(car(bd), newbindings)
+			store_cdr(b, cons(eval(newbindings, car(cdr(bd))), NULL))
+			bindingdefs = cdr(bindingdefs)
+		}
+
+		return eval_list(newbindings, cdr(args))
+
 	} else if (op == "lambda") {
 		# for now, only doing the kind where there's a list of formals
 		if (args == NULL) {
@@ -699,6 +741,19 @@ function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, newbindings,
 			}
 			args = cdr(args)
 		}
+
+	} else if (op == "if") {
+		if (args == NULL || one_elt_list(args)) {
+			print("wrong number of arguments line", DEBUG[args])
+			exit(1)
+		}
+		predicate = car(args)
+		if (eval(env, predicate) != "#f") {
+			return eval(env, car(cdr(args)))
+		} else if (cdr(cdr(args)) != NULL) {
+			return eval(env, car(cdr(cdr(args))))
+		}
+		# else, retval is "unspecified"
 
 	} else {
 		print("somehow you called this with an unsupported syntax:", op)
@@ -1091,6 +1146,8 @@ function is_string(v) {
 # TODO maybe rename "thing"
 # TODO maybe try pretty-printing, but I don't think it would be easy
 # I mean adding better line breaks and indentation.
+# TODO maybe have an arg in display that will prevent loops, either by
+#		having a maxdepth, or by trying to detect them
 function display(thing,		stack, stackptr, mode) {
 
 	# push initial place we want to go, to stack
