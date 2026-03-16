@@ -77,9 +77,9 @@ function tokenize_around_special_chars(line,	metachar, metachar_pos) {
 
 	# look for "metachars", characters with special importance to
 	# tokenizing, and react accordingly.
-	# the regexp is of course hard to read, it looks for ( ) ' " ; |
+	# the regexp is of course hard to read, it looks for ( ) ' " ; | , `
 	# not using split() because there's apparently no way to capture the matches
-	while (match(line, /([\(\)\'\"\;\|])/)) {
+	while (match(line, /([\(\)\'\"\;\|\,\`])/)) {
 		metachar_pos = RSTART # TODO why didn't i want to use index() here?
 		metachar = substr(line, metachar_pos, 1)
 
@@ -87,7 +87,21 @@ function tokenize_around_special_chars(line,	metachar, metachar_pos) {
 		tokenize_whitespace_delim(substr(line, 1, metachar_pos - 1))
 
 		# now deal with the metachar and whatever's after it
-		if (metachar == "(" || metachar == ")" || metachar == "'") {
+		if (metachar == ",") {
+			# see if there's a @ following, handle differently
+			if (length(line) > metachar_pos && substr(line, metachar_pos + 1, 1) == "@") {
+				# if it's ",@", push that, deal with it during parsing
+				tokens[tokens_idx, "lineno"] = NR
+				tokens[tokens_idx++] = ",@"
+				line = substr(line, metachar_pos + 2)
+			} else {
+				# just push onto token queue and proceed
+				# we'll deal with it during parsing.
+				tokens[tokens_idx, "lineno"] = NR
+				tokens[tokens_idx++] = metachar
+				line = substr(line, metachar_pos + 1)
+			}
+		} else if (metachar == "(" || metachar == ")" || metachar == "'" || metachar == "`") {
 			# just push onto token queue and proceed
 			# we'll deal with these specially later, during parsing.
 			tokens[tokens_idx, "lineno"] = NR
@@ -358,8 +372,15 @@ function eat_expression(	token, lineno) {
 		return eat_list_expression()
 	}
 
+	# some special chars that translate into things that live like lists
 	if (token == "'") {
 		return cons("quote", cons(eat_expression(), NULL), lineno)
+	} else if (token == "`") {
+		return cons("quasiquote", cons(eat_expression(), NULL), lineno)
+	} else if (token == ",") {
+		return cons("unquote", cons(eat_expression(), NULL), lineno)
+	} else if (token == ",@") {
+		return cons("unquote-splicing", cons(eat_expression(), NULL), lineno)
 	}
 
 	# if it's not a pair or a quote, the token is a single scalar thing
@@ -449,7 +470,7 @@ function eval(env, expr,		op, args, ref) {
 	# TODO i hate these lists of keywords
 	#	but i can't think of a more elegant solution within pure awk,
 	#	and using c or gawk extensions feels like a cheat.
-	if (op == "define" || op == "set!" || op == "let" || op == "let*" || op == "letrec" || op == "lambda" || op == "quote" || op == "cond" || op == "if") {
+	if (op == "define" || op == "set!" || op == "let" || op == "let*" || op == "letrec" || op == "lambda" || op == "quote" || op == "quasiquote" || op == "cond" || op == "if") {
 		return syntax(op, args, env)
 		# TODO I notice that the repl I'm using as a comparison,
 		# calls some of this stuff "macro".  are they actually using
@@ -718,6 +739,19 @@ function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, bd, newbindi
 		}
 		return car(args)
 
+	} else if (op == "quasiquote") {
+		if (!one_elt_list(args)) {
+			print("wrong number of arguments line", DEBUG[args])
+			exit(1)
+		}
+		if (!is_pair(car(args))) {
+			return car(args)
+		}
+		# to do this, we're going to have to create and return
+		# copy of the quoted list.  this will be a lot easier
+		# done in a function
+		return quasiquote(car(args), env)
+
 	} else if (op == "cond") {
 		if (args == NULL || one_elt_list(args)) {
 			print("wrong number of arguments line", DEBUG[args])
@@ -758,6 +792,52 @@ function syntax(op, args, env,		id, expr, ref, val, bindingdefs, b, bd, newbindi
 	} else {
 		print("somehow you called this with an unsupported syntax:", op)
 	}
+}
+
+# handle quoted lists, interpolating executed stuff as necessary
+# TODO I'm putting this in its own function because I suspect it will be
+# much easier to use recursion to create a new copy of its list argument --
+# but I had half-committed to try to keep stacks shallow in the future...
+# you always hurt the one you love, which in this case is myself.
+# Anyway maybe change this later.
+function quasiquote(arg, env) {
+	if (arg == NULL) {
+		return NULL
+	}
+
+	if (is_pair(car(arg)) && car(car(arg)) == "unquote") {
+		return cons(eval(env, car(cdr(car(arg)))), quasiquote(cdr(arg), env))
+	}
+
+	if (is_pair(car(arg)) && car(car(arg)) == "unquote-splicing") {
+		return append(eval(env, car(cdr(car(arg)))), quasiquote(cdr(arg), env))
+	}
+
+	# it doesn't say this explicitly in r7rs, but it seems like
+	# quote segments are themselves subject to quasiquoting.
+	# which strikes me as weird.  There's also a thing about levels
+	# of quasiquoting which I intend to ignore for now.
+	# anyway the idea here is to descend into the quoted segment,
+	# quasiquoting but preserving the quote structure.
+	# again, this seems nuts, but satisfies an example in the text.
+	if (is_pair(car(arg)) && car(car(arg)) == "quote") {
+		return cons(cons("quote", quasiquote(cdr(car(arg)), env)), quasiquote(cdr(arg), env))
+	}
+
+	 # else, we don't execute anything
+	return cons(car(arg), quasiquote(cdr(arg), env))
+}
+
+# append is a scheme standard procedure, but this isn't a proper implementation
+# of  it, because the official one can take zero or more args, and this one
+# takes exactly 2.  also i'm not sure if the handling of the last arg
+# is correct.
+# TODO check/fix this
+function append(pair1, pair2) {
+	if (pair1 == NULL) {
+		return pair2
+	}
+	return cons(car(pair1), append(cdr(pair1), pair2))
 }
 
 # TODO i could probably find an is_empty and/or not_empty useful...
