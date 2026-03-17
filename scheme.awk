@@ -28,6 +28,8 @@ END {
 	dump_heap()
 	print("start:", expressions)
 
+	load_syntax()
+
 	# note that we're being destructive with "expressions" here...
 	while(expressions != NULL) {
 		expr = car(expressions)
@@ -466,11 +468,8 @@ function eval(env, expr,		op, args, ref) {
 
 	args = cdr(expr)
 
-	# handling syntax, this is such a hack.
-	# TODO i hate these lists of keywords
-	#	but i can't think of a more elegant solution within pure awk,
-	#	and using c or gawk extensions feels like a cheat.
-	if (op == "define" || op == "set!" || op == "let" || op == "let*" || op == "letrec" || op == "lambda" || op == "quote" || op == "quasiquote" || op == "cond" || op == "if") {
+	# handling syntax
+	if (SYNTAX[op]) {
 		return syntax(op, args, env)
 		# TODO I notice that the repl I'm using as a comparison,
 		# calls some of this stuff "macro".  are they actually using
@@ -491,8 +490,6 @@ function eval(env, expr,		op, args, ref) {
 
 	# look up the operator to see if it's bound
 	ref = eval(env, op)
-#print("i fucking hate you", op, ref)
-#display(env)
 	# note that the above will end the program if it's unbound.
 	# TODO this may not be the behavior i want
 	if (ref == "|BUILTIN") {
@@ -509,6 +506,19 @@ function eval(env, expr,		op, args, ref) {
 	print("Don't know how to evaluate", op)
 	exit(1)
 }
+
+# create a global associative array of syntactical operators
+# (that's probably not the right word but i'm tired and don't care)
+# that can be accessed more or less cleanly
+function load_syntax(	keywords, idx) {
+	split("define set! let let* letrec lambda quote quasiquote cond if", keywords)
+	for (idx in keywords) {
+		SYNTAX[keywords[idx]] = 1
+	}
+}
+
+
+
 
 
 function eval_list(env, list,		expr, result) {
